@@ -1,0 +1,12 @@
+.vs/
+**/bin/
+**/obj/
+dist/
+_output/
+*.user
+*.suo
+*.log
+*.docx
+*.pdf
+**/*.exe.WebView2/
+
