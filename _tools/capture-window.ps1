@@ -1,5 +1,5 @@
 param(
-    [string]$OutFile = (Join-Path $PSScriptRoot '..\_output\ui.png'),
+    [string]$OutFile = "C:\Users\AZURE\Desktop\md2word\CODEX\_output\ui.png",
     [string]$ProcessName = "MarkdownToWord",
     [int]$WaitSeconds = 8
 )
@@ -32,7 +32,7 @@ public static class Win32Capture
 Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue
 [Win32Capture]::SetProcessDPIAware() | Out-Null
 
-$exe = Join-Path $PSScriptRoot '..\MarkdownToWord\bin\Debug\net10.0-windows10.0.19041.0\win-x64\MarkdownToWord.exe'
+$exe = "C:\Users\AZURE\Desktop\md2word\CODEX\MarkdownToWord\bin\Debug\net10.0-windows10.0.19041.0\win-x64\MarkdownToWord.exe"
 Get-Process $ProcessName -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 

@@ -3,6 +3,9 @@
 **/obj/
 dist/
 _output/
+BACKUP/
+_acceptance_*/
+publish/
 *.user
 *.suo
 *.log

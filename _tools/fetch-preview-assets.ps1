@@ -1,8 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
 $proxy = 'http://127.0.0.1:7897'
-$work = Join-Path $PSScriptRoot '..\_output\assets-download'
-$target = Join-Path $PSScriptRoot '..\MarkdownToWord\Assets\preview'
+$work = 'C:\Users\AZURE\Desktop\md2word\CODEX\_output\assets-download'
+$target = 'C:\Users\AZURE\Desktop\md2word\CODEX\MarkdownToWord\Assets\preview'
 
 New-Item -ItemType Directory -Force -Path $work, $target | Out-Null
 

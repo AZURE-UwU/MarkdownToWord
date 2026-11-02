@@ -2,7 +2,7 @@
 # dump the clipboard formats it offers, check whether FileContents can be read,
 # and optionally put it on the real clipboard (OleSetClipboard + OleFlushClipboard).
 param(
-    [string]$Path = "$env:LOCALAPPDATA\MarkdownToWord\Clipboard\syntax-tour.docx",
+    [string]$Path = "C:\Users\AZURE\AppData\Local\MarkdownToWord\Clipboard\syntax-tour.docx",
     [string]$Text = "probe plain text",
     [switch]$PutOnClipboard,
     [switch]$InspectClipboard,

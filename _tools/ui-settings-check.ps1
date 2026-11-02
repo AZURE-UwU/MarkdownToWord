@@ -1,7 +1,7 @@
 # Inspect the settings flyout with UI Automation: is the new clipboard ComboBox there,
 # is it inside the visible area, and does it expand when asked to?
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\MarkdownToWord\MarkdownToWord.exe'),
+    [string]$Exe = "C:\Users\AZURE\Desktop\md2word\CODEX\dist\MarkdownToWord\MarkdownToWord.exe",
     [switch]$Expand
 )
 

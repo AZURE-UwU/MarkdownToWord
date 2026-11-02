@@ -1,6 +1,6 @@
 param(
-    [string]$OutFile = (Join-Path $PSScriptRoot '..\_output\ui.png'),
-    [string]$ExePath = (Join-Path $PSScriptRoot '..\MarkdownToWord\bin\Debug\net10.0-windows10.0.19041.0\win-x64\MarkdownToWord.exe'),
+    [string]$OutFile = "C:\Users\AZURE\Desktop\md2word\CODEX\_output\ui.png",
+    [string]$ExePath = "C:\Users\AZURE\Desktop\md2word\CODEX\MarkdownToWord\bin\Debug\net10.0-windows10.0.19041.0\win-x64\MarkdownToWord.exe",
     [int]$WaitSeconds = 8
 )
 

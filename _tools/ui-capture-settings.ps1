@@ -1,8 +1,8 @@
 # Open the settings flyout with UI Automation and screenshot just the app window area,
 # so we can see the actual layout of the clipboard option.
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\MarkdownToWord\MarkdownToWord.exe'),
-    [string]$OutFile = (Join-Path $PSScriptRoot '..\_output\ui-settings.png')
+    [string]$Exe = "C:\Users\AZURE\Desktop\md2word\CODEX\dist\MarkdownToWord\MarkdownToWord.exe",
+    [string]$OutFile = "C:\Users\AZURE\Desktop\md2word\CODEX\_output\ui-settings.png"
 )
 
 $ErrorActionPreference = 'Stop'

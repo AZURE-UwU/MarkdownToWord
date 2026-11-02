@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-$target = Join-Path (Join-Path $PSScriptRoot '..\_output') "extract-$stamp"
+$target = Join-Path "C:\Users\AZURE\Desktop\md2word\CODEX\_output" "extract-$stamp"
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 
 [System.IO.Compression.ZipFile]::ExtractToDirectory($DocxPath, $target)

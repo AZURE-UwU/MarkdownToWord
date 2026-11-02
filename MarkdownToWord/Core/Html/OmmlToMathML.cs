@@ -344,6 +344,7 @@ internal static class OmmlToMathML
     }
 
     private static bool IsNumber(string text) =>
+        text.Any(char.IsDigit) &&
         text.All(ch => char.IsDigit(ch) || ch is '.' or ',' or '\u2212');
 
     private static bool IsOperator(string text)

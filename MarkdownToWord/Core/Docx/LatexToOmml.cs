@@ -52,8 +52,27 @@ internal static class LatexToOmml
         ["to"] = "\u2192", ["rightarrow"] = "\u2192", ["leftarrow"] = "\u2190",
         ["gets"] = "\u2190", ["leftrightarrow"] = "\u2194", ["Rightarrow"] = "\u21D2",
         ["Leftarrow"] = "\u21D0", ["Leftrightarrow"] = "\u21D4", ["mapsto"] = "\u21A6",
-        ["uparrow"] = "\u2191", ["downarrow"] = "\u2193", ["longrightarrow"] = "\u27F6",
-        ["longleftarrow"] = "\u27F5", ["hookrightarrow"] = "\u21AA", ["hookleftarrow"] = "\u21A9",
+        ["uparrow"] = "\u2191", ["downarrow"] = "\u2193", ["updownarrow"] = "\u2195",
+        ["Uparrow"] = "\u21D1", ["Downarrow"] = "\u21D3", ["Updownarrow"] = "\u21D5",
+        ["nearrow"] = "\u2197", ["searrow"] = "\u2198", ["swarrow"] = "\u2199", ["nwarrow"] = "\u2196",
+        ["longrightarrow"] = "\u27F6", ["longleftarrow"] = "\u27F5",
+        ["longleftrightarrow"] = "\u27F7", ["Longrightarrow"] = "\u27F9",
+        ["Longleftarrow"] = "\u27F8", ["Longleftrightarrow"] = "\u27FA",
+        ["implies"] = "\u27F9", ["impliedby"] = "\u27F8", ["iff"] = "\u27FA",
+        ["longmapsto"] = "\u27FC", ["hookrightarrow"] = "\u21AA", ["hookleftarrow"] = "\u21A9",
+        ["twoheadrightarrow"] = "\u21A0", ["twoheadleftarrow"] = "\u219E",
+        ["rightharpoonup"] = "\u21C0", ["rightharpoondown"] = "\u21C1",
+        ["leftharpoonup"] = "\u21BC", ["leftharpoondown"] = "\u21BD",
+        ["rightleftharpoons"] = "\u21CC", ["leftrightharpoons"] = "\u21CB",
+        // 可独立使用的定界符命令；无 \left/\right 时仍必须转换为数学符号。
+        ["langle"] = "\u27E8", ["rangle"] = "\u27E9",
+        ["lceil"] = "\u2308", ["rceil"] = "\u2309",
+        ["lfloor"] = "\u230A", ["rfloor"] = "\u230B",
+        ["vert"] = "|", ["Vert"] = "\u2016",
+        ["lvert"] = "|", ["rvert"] = "|",
+        ["lVert"] = "\u2016", ["rVert"] = "\u2016",
+        ["lbrace"] = "{", ["rbrace"] = "}",
+        ["lbrack"] = "[", ["rbrack"] = "]",
         // 大型运算符
         ["sum"] = "\u2211", ["prod"] = "\u220F", ["coprod"] = "\u2210", ["int"] = "\u222B",
         ["iint"] = "\u222C", ["iiint"] = "\u222D", ["oint"] = "\u222E",
@@ -71,7 +90,7 @@ internal static class LatexToOmml
         ["copyright"] = "\u00A9", ["pounds"] = "\u00A3",
         // 转义字符
         ["{"] = "{", ["}"] = "}", ["%"] = "%", ["&"] = "&", ["#"] = "#", ["$"] = "$",
-        ["_"] = "_", ["|"] = "\u2016", ["backslash"] = "\\",
+        ["_"] = "_", ["|"] = "\u2016", ["backslash"] = "\\", [" "] = " ",
     };
 
     private static readonly HashSet<string> BigOperators = new(StringComparer.Ordinal)
@@ -345,6 +364,7 @@ internal static class LatexToOmml
     {
         private readonly string _s = source;
         private int _i;
+        private bool _uprightMode;
 
         private bool Eof => _i >= _s.Length;
 
@@ -479,7 +499,9 @@ internal static class LatexToOmml
             if (Peek == '{')
             {
                 _i++;
+                var uprightMode = _uprightMode;
                 var nodes = ParseRow(stopAt: null);
+                _uprightMode = uprightMode;
                 if (Peek == '}')
                 {
                     _i++;
@@ -505,7 +527,9 @@ internal static class LatexToOmml
             if (c == '{')
             {
                 _i++;
+                var uprightMode = _uprightMode;
                 var nodes = ParseRow(stopAt: null);
+                _uprightMode = uprightMode;
                 if (Peek == '}')
                 {
                     _i++;
@@ -526,7 +550,7 @@ internal static class LatexToOmml
             }
 
             _i++;
-            return [MathRun(c.ToString(), upright: false)];
+            return [MathRun(c.ToString(), upright: _uprightMode)];
         }
 
         private void SkipSpaces()
@@ -739,6 +763,10 @@ internal static class LatexToOmml
                 case ";":
                 case ">":
                 case " ":
+                    return [];
+
+                case "rm":
+                    _uprightMode = true;
                     return [];
 
                 case "quad":
@@ -1208,7 +1236,9 @@ internal static class LatexToOmml
             if (Peek == '{')
             {
                 _i++;
+                var uprightMode = _uprightMode;
                 var nodes = ParseRow(stopAt: null);
+                _uprightMode = uprightMode;
                 if (Peek == '}')
                 {
                     _i++;

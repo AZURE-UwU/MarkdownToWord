@@ -3,31 +3,35 @@
 `markdowntoword.io/zh` 核心功能（Markdown → Word）的**完全离线**桌面复刻版，用 WinUI 3 + Windows App SDK 1.8 实现，
 转换全部在本机完成，不联网、不上传、不依赖任何在线服务。
 
-源码仓库不包含 `bin`、`obj`、`dist`、验证产物或浏览器缓存。可直接运行的版本发布在 GitHub Releases；从源码构建的方法见 `_tools\publish-singlefile.ps1` 和本节末尾的构建说明。
-
 ## 目录结构
 
 | 路径 | 说明 |
 | --- | --- |
+| `dist/MarkdownToWord/` | **可直接运行的程序**：双击 `MarkdownToWord.exe` |
+| `dist/MarkdownToWord-SingleFile/` | **单文件版**：就一个 `MarkdownToWord.exe`（218 MB，运行时全在里面） |
 | `MarkdownToWord/` | 完整源码工程（.NET 10 + WinUI 3） |
 | `MarkdownToWord/Samples/syntax-tour.md` | 语法覆盖测试样例（本文档的大量验证都基于它） |
 | `docs/clipboard-format.md` | 剪贴板 HTML、图片和 MathML 格式规范及 Microsoft 官方依据 |
 | `_tools/` | 本次开发用的辅助脚本：API 反射、文档校验、Word 转 PDF、界面截图、程序图标生成（`make-app-icon.ps1`）、剪贴板格式检查等 |
+| `_output/` | 验证产物：生成的 docx / pdf / 页面截图 / 校验输出 |
+| `BACKUP/DEL/` | 按你的规则，所有被替换掉的旧产物都移动到这里，没有删除任何文件 |
 
 ## 怎么用
 
-1. 从 Releases 下载并解压程序，双击 `MarkdownToWord.exe`（免安装、免注册表）。
+1. 双击 `dist/MarkdownToWord/MarkdownToWord.exe`（免安装、免注册表，Windows App SDK 已随程序自带）。
+   点击窗口关闭按钮不会退出程序，而是隐藏到系统托盘；双击托盘图标恢复窗口，右键托盘图标选择“退出”才会结束进程。
 2. 三种输入方式任选：左侧直接编辑/粘贴、`打开` 选择 `.md` 文件、把 `.md` 文件拖进窗口。
 3. 右侧实时预览（代码高亮 + 公式渲染），点 `导出 Word` 选择保存位置即可得到 `.docx`。
-4. 不想存文件时点 `复制 Word`：剪贴板里是 HTML 富文本，在 Word 里 Ctrl+V 会把正文带格式插到光标处，沿用目标文档的页面设置；公式写的是 OMML，粘过去就是 **Word 原生公式**，并跟随设置中的正文字体和字号；标题、列表、表格、代码高亮、图片都保留。
+4. 不想存文件时点 `复制 Word`：剪贴板里是 HTML 富文本，在 Word 里 Ctrl+V 会把正文带格式插到光标处，沿用目标文档的页面设置；公式写的是 MathML，Office 粘贴时转换为 **原生 Office 公式**；标题、列表、表格、代码高亮、图片都保留。
    在编辑框里**粘贴**后会自动按最新内容重跑一次同样的复制（设置 → 剪贴板 →「粘贴后自动复制」，默认开）。
    在右侧预览里单击后按 `Ctrl+C`（没有选中文字时）也会复制当前 Markdown 的 Word 富文本，而不是复制预览里的示例图片。
 
    复制成功的横幅 1 秒后自动收起（警告和错误会留着等人处理）。
 5. `设置` 里可调页面尺寸、方向、页边距、正文字体字号，以及标题编号 / 代码高亮 / 公式 / 网络图片等开关，设置会自动记住。
-   「窗口快捷键」默认是 `Alt+D`：程序不在前台时恢复并聚焦，已在前台时最小化。点击快捷键按钮后按下新组合键，再按回车确认；按 `Esc` 取消录入。
+   「窗口快捷键」有独立启用开关，默认开启，按键默认是 `Alt+D`：程序不在前台时恢复并聚焦，已在前台时最小化。点击快捷键按钮后按下新组合键，再按回车确认；按 `Esc` 取消录入。
+   「后台剪贴板转换」默认关闭且没有快捷键。开启后可录入第二组组合键；按下时读取剪贴板纯文本，在后台替换为 Word 富文本，只发送 Windows 系统通知，不切换前台窗口。
 
-快捷键：全局 `Alt+D` 显示/最小化窗口（可在设置中修改）、`Ctrl+O` 打开、`Ctrl+S` 保存 Markdown、`Ctrl+E` 导出 Word。
+快捷键：全局 `Alt+D` 显示/最小化窗口（可在设置中关闭或修改）、可配置的后台剪贴板转换（默认关闭且无按键）、`Ctrl+O` 打开、`Ctrl+S` 保存 Markdown、`Ctrl+E` 导出 Word。
 
 ## 两个发行版：散文件版 / 单文件版
 
@@ -87,11 +91,12 @@ MarkdownToWord.exe --convert <input.md> <output.docx> [选项]
 
 - **解析**：Markdig 1.4（开启管道/网格表格、脚注、定义列表、任务列表、EmphasisExtras、数学、警报块、CJK 友好强调等扩展）。
 - **导出**：直接用 Open XML SDK 3.5 生成 `docx`（自建 `styles.xml` / `numbering.xml` / `footnotes.xml`），不依赖 Word，也不需要 Office。
-- **公式**：自写 LaTeX → OMML 转换器，支持分式、根式、上下标、求和/积分上下限、`\xrightarrow{…}` / `\xleftarrow{…}`（含笔记简写 `\xrightarrowddt`）、`\left…\right` 定界符、矩阵、`cases` 分段函数、希腊字母与常用符号表。
+- **公式**：自写 LaTeX → OMML 转换器，支持分式、根式、上下标、求和/积分上下限、`\xrightarrow{…}` / `\xleftarrow{…}`（含笔记简写 `\xrightarrowddt`）、`\left…\right` 定界符、矩阵、`cases` 分段函数、希腊字母、长短箭头与常用符号表。
 - **预览**：WebView2 + 本地 KaTeX / highlight.js（共 1.4 MB，已随程序打包），通过虚拟主机映射加载，完全离线。
 - **预览宿主**：主窗口被 DWM cloak（切换虚拟桌面）或最小化期间折叠 `WebView2`，恢复时重新显示。WebView2 的宿主顶层窗口（`Chrome_WidgetWin_1`）不随 cloak 隐藏，留在当前桌面时仍接受文件拖放（WebView2 运行时 1.0.x）。
 - **全局快捷键**：Win32 `RegisterHotKey` 注册到本进程的 message-only 窗口；`WM_HOTKEY` 只在主窗口无权切到前台时复用 `Activate` + `SetForegroundWindow`。
 - **界面**：WinUI 3（非打包 / 自带运行时），中英文字体分别设置，浅色/深色/跟随系统主题。
+- **系统托盘**：Win32 `Shell_NotifyIcon` 承载托盘图标和右键菜单；隐藏顶层消息窗口负责双击与右键回调，关闭主窗口时取消关闭并调用 `AppWindow.Hide()`。
 - **剪贴板**：走 shell 的 `IDataObject`（`SHBindToParent` + `IShellFolder.GetUIObjectOf`）+ `OleSetClipboard`，和资源管理器复制文件完全一致。刻意**不用** WinRT 的 `DataPackage.SetStorageItems`：它只写出带 `FD_LINKUI` 的 `FileGroupDescriptorW`，既没有配套的 `FileContents` 数据流、`FileNameW` 还是空串，Word 会把它当成"链接到某个文件的对象"，取内容失败即弹"Word 无法获取 … 链接的数据"。同样刻意**不调用** `OleFlushClipboard`：实测 Flush 会把 `FileContents` 丢掉，等于把老毛病搬回来。
 - **带格式的正文（HTML 剪贴板）**：Markdown 用同一套 Markdig 管线渲染成 HTML。公式按 Microsoft 365 官方规范输出 MathML 3 Presentation MathML，Office 在粘贴时转换为可编辑的 Office Math；OMML 只用于生成 `.docx`。图片以 base64 `data:` URI 内嵌，最后包成 CF_HTML 通过 Win32 静态剪贴板写入（附一份清理过 HTML/SVG 标记的纯文本兜底）。完整规则与官方链接见 [`docs/clipboard-format.md`](docs/clipboard-format.md)。
 

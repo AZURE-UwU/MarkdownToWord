@@ -1,7 +1,7 @@
 # Drive the clipboard option through UI Automation: open settings, expand the combo,
 # select an item, and report whether the selection stuck (and whether settings.json changed).
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\MarkdownToWord\MarkdownToWord.exe'),
+    [string]$Exe = "C:\Users\AZURE\Desktop\md2word\CODEX\dist\MarkdownToWord\MarkdownToWord.exe",
     [int]$SelectIndex = 0
 )
 
@@ -114,7 +114,7 @@ try {
         $g = [System.Drawing.Graphics]::FromImage($shot)
         $g.CopyFromScreen($left, $top, 0, 0, (New-Object System.Drawing.Size ($right - $left), ($bottom - $top)))
         $g.Dispose()
-        $shot.Save((Join-Path $PSScriptRoot '..\_output\ui-clipboard-option.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+        $shot.Save("C:\Users\AZURE\Desktop\md2word\CODEX\_output\ui-clipboard-option.png", [System.Drawing.Imaging.ImageFormat]::Png)
         $shot.Dispose()
         Write-Host "screenshot: _output\ui-clipboard-option.png"
     }

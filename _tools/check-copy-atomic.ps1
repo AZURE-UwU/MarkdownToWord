@@ -1,12 +1,12 @@
 param(
-    [string]$ExePath = (Join-Path $PSScriptRoot '..\dist\MarkdownToWord\MarkdownToWord.exe'),
-    [string]$SourcePath = (Join-Path $PSScriptRoot '..\MarkdownToWord\Samples\syntax-tour.md')
+    [string]$ExePath = "C:\Users\AZURE\Desktop\md2word\CODEX\dist\MarkdownToWord\MarkdownToWord.exe",
+    [string]$SourcePath = "C:\Users\AZURE\Desktop\md2word\CODEX\dist\MarkdownToWord\Samples\syntax-tour.md"
 )
 
 Add-Type -AssemblyName System.Windows.Forms
 
-$outFile = Join-Path $PSScriptRoot '..\_output\clip-check.out.txt'
-$errFile = Join-Path $PSScriptRoot '..\_output\clip-check.err.txt'
+$outFile = "C:\Users\AZURE\Desktop\md2word\CODEX\_output\clip-check.out.txt"
+$errFile = "C:\Users\AZURE\Desktop\md2word\CODEX\_output\clip-check.err.txt"
 
 # 先清空剪贴板，避免看到上一次的残留
 [System.Windows.Forms.Clipboard]::Clear()

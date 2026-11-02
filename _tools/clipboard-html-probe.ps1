@@ -1,7 +1,7 @@
 # Read the "HTML Format" clipboard data straight from the Win32 clipboard and report
 # what a consumer (Word) would see: CF_HTML header offsets, OMML formulas, images, text.
 param(
-    [string]$DumpTo = (Join-Path $PSScriptRoot '..\_output\clipboard-html.html')
+    [string]$DumpTo = "C:\Users\AZURE\Desktop\md2word\CODEX\_output\clipboard-html.html"
 )
 
 $code = @'

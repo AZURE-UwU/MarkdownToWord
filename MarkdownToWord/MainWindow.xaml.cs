@@ -3,7 +3,9 @@ using System.Text;
 using System.Text.Json;
 using MarkdownToWord.Clipboard;
 using MarkdownToWord.Core;
+using MarkdownToWord.Notifications;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -20,7 +22,8 @@ namespace MarkdownToWord;
 public sealed partial class MainWindow : Window
 {
     private const string VirtualHost = "assets.local";
-    private const uint GlobalHotkeyId = 0x4D57;
+    private const uint ToggleHotkeyId = 0x4D57;
+    private const uint BackgroundConvertHotkeyId = 0x4D58;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
@@ -37,6 +40,7 @@ public sealed partial class MainWindow : Window
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _messageTimer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _windowStateTimer;
     private readonly WindowMessageProc _hotkeyWindowProc;
+    private TrayIconService? _trayIcon;
     private Storyboard? _messageStoryboard;
     private bool _messageVisible;
     private bool _previewSuspended;
@@ -44,12 +48,15 @@ public sealed partial class MainWindow : Window
     private IntPtr _windowHandle;
     private IntPtr _hotkeyWindow;
     private string _hotkeyWindowClass = string.Empty;
-    private bool _hotkeyRegistered;
-    private bool _recordingHotkey;
-    private HotkeyGesture _activeHotkey;
-    private HotkeyGesture _pendingHotkey;
+    private bool _toggleHotkeyRegistered;
+    private bool _backgroundConvertHotkeyRegistered;
+    private HotkeyTarget _recordingHotkeyTarget;
+    private HotkeyGesture _toggleHotkey;
+    private HotkeyGesture? _backgroundConvertHotkey;
+    private HotkeyGesture? _pendingHotkey;
     private bool _autoCopyAfterPaste = true;
     private int _clipboardGeneration;
+    private int _backgroundClipboardBusy;
 
     private static readonly string[] PageSizeOptions = ["A4", "Letter", "A5", "Legal"];
     private static readonly string[] OrientationOptions = ["纵向", "横向"];
@@ -69,6 +76,7 @@ public sealed partial class MainWindow : Window
     private bool _previewReady;
     private bool _initializing = true;
     private bool _busy;
+    private bool _allowExit;
 
     public MainWindow()
     {
@@ -76,6 +84,7 @@ public sealed partial class MainWindow : Window
         _hotkeyWindowProc = HotkeyWindowProcImpl;
         Title = "Markdown 转 Word · 离线版";
         ApplyWindowIcon();
+        AppWindow.Closing += OnAppWindowClosing;
 
         _converter = new MarkdownConverter(_options);
         _previewTimer = DispatcherQueue.CreateTimer();
@@ -170,15 +179,31 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _activeHotkey = ReadConfiguredHotkey();
-        UpdateHotkeyDisplay(_activeHotkey);
-        if (!TryRegisterGlobalHotkey(_activeHotkey, out var error))
+        InitializeTrayIcon();
+        _toggleHotkey = ReadConfiguredToggleHotkey();
+        _backgroundConvertHotkey = ReadConfiguredBackgroundConvertHotkey();
+        UpdateHotkeyDisplay(HotkeyTarget.ToggleWindow, _toggleHotkey);
+        UpdateHotkeyDisplay(HotkeyTarget.BackgroundConvert, _backgroundConvertHotkey);
+
+        if (_settings.ToggleWindowHotkeyEnabled &&
+            !TryRegisterHotkey(HotkeyTarget.ToggleWindow, _toggleHotkey, out var error))
         {
-            ShowHotkeyError($"全局快捷键 {_activeHotkey.DisplayText} 注册失败：{error}");
+            ShowHotkeyError($"窗口快捷键 {_toggleHotkey.DisplayText} 注册失败：{error}");
+        }
+
+        if (_settings.BackgroundConvertEnabled && _backgroundConvertHotkey is { } backgroundHotkey &&
+            !TryRegisterHotkey(HotkeyTarget.BackgroundConvert, backgroundHotkey, out error))
+        {
+            ShowHotkeyError($"后台转换快捷键 {backgroundHotkey.DisplayText} 注册失败：{error}");
+        }
+
+        if (_settings.BackgroundConvertEnabled && !AppNotificationService.Initialize())
+        {
+            ShowHotkeyError("后台转换可用，但当前系统通知不可用：" + AppNotificationService.LastError);
         }
     }
 
-    private HotkeyGesture ReadConfiguredHotkey()
+    private HotkeyGesture ReadConfiguredToggleHotkey()
     {
         var modifiers = (uint)_settings.ToggleHotkeyModifiers & AllowedModifiers;
         var key = (uint)_settings.ToggleHotkeyKey;
@@ -187,9 +212,18 @@ public sealed partial class MainWindow : Window
             : HotkeyGesture.Default;
     }
 
-    private bool TryRegisterGlobalHotkey(HotkeyGesture hotkey, out string error)
+    private HotkeyGesture? ReadConfiguredBackgroundConvertHotkey()
     {
-        UnregisterGlobalHotkey();
+        var modifiers = (uint)_settings.BackgroundConvertHotkeyModifiers & AllowedModifiers;
+        var key = (uint)_settings.BackgroundConvertHotkeyKey;
+        return modifiers != 0 && IsValidHotkeyKey(key)
+            ? new HotkeyGesture(modifiers, key)
+            : null;
+    }
+
+    private bool TryRegisterHotkey(HotkeyTarget target, HotkeyGesture hotkey, out string error)
+    {
+        UnregisterHotkey(target);
         if (_hotkeyWindow == IntPtr.Zero)
         {
             error = "快捷键消息窗口不可用。";
@@ -198,11 +232,11 @@ public sealed partial class MainWindow : Window
 
         if (RegisterHotKey(
                 _hotkeyWindow,
-                (int)GlobalHotkeyId,
+                (int)HotkeyId(target),
                 hotkey.Modifiers | ModNoRepeat,
                 hotkey.Key))
         {
-            _hotkeyRegistered = true;
+            SetHotkeyRegistered(target, true);
             error = string.Empty;
             return true;
         }
@@ -215,15 +249,41 @@ public sealed partial class MainWindow : Window
         return false;
     }
 
-    private void UnregisterGlobalHotkey()
+    private void UnregisterHotkey(HotkeyTarget target)
     {
-        if (!_hotkeyRegistered)
+        if (!IsHotkeyRegistered(target))
         {
             return;
         }
 
-        UnregisterHotKey(_hotkeyWindow, (int)GlobalHotkeyId);
-        _hotkeyRegistered = false;
+        UnregisterHotKey(_hotkeyWindow, (int)HotkeyId(target));
+        SetHotkeyRegistered(target, false);
+    }
+
+    private void UnregisterAllHotkeys()
+    {
+        UnregisterHotkey(HotkeyTarget.ToggleWindow);
+        UnregisterHotkey(HotkeyTarget.BackgroundConvert);
+    }
+
+    private static uint HotkeyId(HotkeyTarget target) =>
+        target == HotkeyTarget.BackgroundConvert ? BackgroundConvertHotkeyId : ToggleHotkeyId;
+
+    private bool IsHotkeyRegistered(HotkeyTarget target) =>
+        target == HotkeyTarget.BackgroundConvert
+            ? _backgroundConvertHotkeyRegistered
+            : _toggleHotkeyRegistered;
+
+    private void SetHotkeyRegistered(HotkeyTarget target, bool registered)
+    {
+        if (target == HotkeyTarget.BackgroundConvert)
+        {
+            _backgroundConvertHotkeyRegistered = registered;
+        }
+        else
+        {
+            _toggleHotkeyRegistered = registered;
+        }
     }
 
     private bool CreateHotkeyMessageWindow()
@@ -257,7 +317,7 @@ public sealed partial class MainWindow : Window
             0,
             0,
             0,
-            new IntPtr(-3),
+            IntPtr.Zero,
             IntPtr.Zero,
             instance,
             IntPtr.Zero);
@@ -273,106 +333,263 @@ public sealed partial class MainWindow : Window
 
     private void OnToggleHotkeyClicked(object sender, RoutedEventArgs e)
     {
-        if (_recordingHotkey)
+        if (!WindowHotkeyToggle.IsOn)
         {
-            CancelHotkeyRecording();
             return;
         }
 
-        StartHotkeyRecording();
+        if (_recordingHotkeyTarget == HotkeyTarget.ToggleWindow)
+        {
+            CancelHotkeyRecording(HotkeyTarget.ToggleWindow);
+            return;
+        }
+
+        StartHotkeyRecording(HotkeyTarget.ToggleWindow);
     }
 
-    private void StartHotkeyRecording()
+    private void OnWindowHotkeyToggled(object sender, RoutedEventArgs e)
     {
-        UnregisterGlobalHotkey();
-        _recordingHotkey = true;
-        _pendingHotkey = default;
-        ToggleHotkeyValue.Text = "请按新的组合键…";
-        ToggleHotkeyHint.Text = "组合键需包含 Ctrl、Alt、Shift 或 Win；按 Esc 取消。";
-        ToggleHotkeyButton.Focus(FocusState.Programmatic);
+        if (_initializing)
+        {
+            return;
+        }
+
+        var enabled = WindowHotkeyToggle.IsOn;
+        _settings.ToggleWindowHotkeyEnabled = enabled;
+        WindowHotkeyPanel.IsHitTestVisible = enabled;
+        WindowHotkeyPanel.Opacity = enabled ? 1 : 0.55;
+
+        if (!enabled)
+        {
+            if (_recordingHotkeyTarget == HotkeyTarget.ToggleWindow)
+            {
+                CancelHotkeyRecording(HotkeyTarget.ToggleWindow);
+            }
+
+            UnregisterHotkey(HotkeyTarget.ToggleWindow);
+            ToggleHotkeyHint.Text = "窗口快捷键已关闭。";
+            SaveSettings();
+            return;
+        }
+
+        if (TryRegisterHotkey(HotkeyTarget.ToggleWindow, _toggleHotkey, out var error))
+        {
+            ToggleHotkeyHint.Text = "按快捷键可在前台最小化，或在后台恢复并聚焦。";
+        }
+        else
+        {
+            ToggleHotkeyHint.Text = error + " 请点击按钮更换组合键。";
+            ShowHotkeyError(error);
+        }
+
+        SaveSettings();
+    }
+
+    private void OnBackgroundConvertHotkeyClicked(object sender, RoutedEventArgs e)
+    {
+        if (!BackgroundConvertToggle.IsOn)
+        {
+            return;
+        }
+
+        if (_recordingHotkeyTarget == HotkeyTarget.BackgroundConvert)
+        {
+            CancelHotkeyRecording(HotkeyTarget.BackgroundConvert);
+            return;
+        }
+
+        StartHotkeyRecording(HotkeyTarget.BackgroundConvert);
+    }
+
+    private void OnBackgroundConvertToggled(object sender, RoutedEventArgs e)
+    {
+        if (_initializing)
+        {
+            return;
+        }
+
+        var enabled = BackgroundConvertToggle.IsOn;
+        _settings.BackgroundConvertEnabled = enabled;
+        BackgroundConvertHotkeyPanel.IsHitTestVisible = enabled;
+        BackgroundConvertHotkeyPanel.Opacity = enabled ? 1 : 0.55;
+
+        if (enabled && !AppNotificationService.Initialize())
+        {
+            ShowHotkeyError("后台转换可用，但当前系统通知不可用：" + AppNotificationService.LastError);
+        }
+
+        if (!enabled)
+        {
+            if (_recordingHotkeyTarget == HotkeyTarget.BackgroundConvert)
+            {
+                CancelHotkeyRecording(HotkeyTarget.BackgroundConvert);
+            }
+
+            UnregisterHotkey(HotkeyTarget.BackgroundConvert);
+            BackgroundConvertHotkeyHint.Text = "开启后点击按钮录入组合键；操作在后台完成并发送系统通知。";
+            SaveSettings();
+            return;
+        }
+
+        if (_backgroundConvertHotkey is { } hotkey)
+        {
+            if (TryRegisterHotkey(HotkeyTarget.BackgroundConvert, hotkey, out var error))
+            {
+                BackgroundConvertHotkeyHint.Text = "按快捷键会在后台转换剪贴板，并发送系统通知。";
+            }
+            else
+            {
+                BackgroundConvertHotkeyHint.Text = error + " 请点击按钮更换组合键。";
+                ShowHotkeyError(error);
+            }
+        }
+        else
+        {
+            BackgroundConvertHotkeyHint.Text = "点击按钮录入组合键；未设置时功能不会触发。";
+        }
+
+        SaveSettings();
+    }
+
+    private void StartHotkeyRecording(HotkeyTarget target)
+    {
+        if (target == HotkeyTarget.ToggleWindow && !WindowHotkeyToggle.IsOn)
+        {
+            return;
+        }
+
+        if (_recordingHotkeyTarget is not HotkeyTarget.None)
+        {
+            CancelHotkeyRecording(_recordingHotkeyTarget);
+        }
+
+        UnregisterHotkey(target);
+        _recordingHotkeyTarget = target;
+        _pendingHotkey = null;
+        SetHotkeyRecordingText(target, "请按新的组合键…", "组合键需包含 Ctrl、Alt、Shift 或 Win；按 Esc 取消。");
+
+        if (target == HotkeyTarget.BackgroundConvert)
+        {
+            BackgroundConvertHotkeyButton.Focus(FocusState.Programmatic);
+        }
+        else
+        {
+            ToggleHotkeyButton.Focus(FocusState.Programmatic);
+        }
     }
 
     private void OnHotkeyRecordingKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (!_recordingHotkey || e.KeyStatus.WasKeyDown)
+        if (_recordingHotkeyTarget is HotkeyTarget.None || e.KeyStatus.WasKeyDown)
         {
             return;
         }
 
+        var target = _recordingHotkeyTarget;
         e.Handled = true;
         if (e.Key == VirtualKey.Escape)
         {
-            CancelHotkeyRecording();
+            CancelHotkeyRecording(target);
             return;
         }
 
         if (e.Key == VirtualKey.Enter)
         {
-            CommitHotkeyRecording();
+            CommitHotkeyRecording(target);
             return;
         }
 
         if (HotkeyGesture.IsModifierKey(e.Key))
         {
-            ToggleHotkeyHint.Text = "继续按一个非修饰键，再按回车确认；按 Esc 取消。";
+            SetHotkeyRecordingHint(target, "继续按一个非修饰键，再按回车确认；按 Esc 取消。");
             return;
         }
 
         var modifiers = ReadPressedModifiers();
         if (modifiers == 0)
         {
-            ToggleHotkeyValue.Text = "组合键无效";
-            ToggleHotkeyHint.Text = "至少按下 Ctrl、Alt、Shift、Win 中的一个，再按其他键。";
+            SetHotkeyRecordingText(target, "组合键无效", "至少按下 Ctrl、Alt、Shift、Win 中的一个，再按其他键。");
             return;
         }
 
         var key = (uint)e.Key;
         if (!IsValidHotkeyKey(key))
         {
-            ToggleHotkeyValue.Text = "该按键不可用";
-            ToggleHotkeyHint.Text = "请换一个字母、数字、功能键或导航键。";
+            SetHotkeyRecordingText(target, "该按键不可用", "请换一个字母、数字、功能键或导航键。");
             return;
         }
 
         _pendingHotkey = new HotkeyGesture(modifiers, key);
-        ToggleHotkeyValue.Text = _pendingHotkey.DisplayText;
-        ToggleHotkeyHint.Text = "按回车确认，按 Esc 取消。";
+        SetHotkeyRecordingText(target, _pendingHotkey.Value.DisplayText, "按回车确认，按 Esc 取消。");
     }
 
-    private void CommitHotkeyRecording()
+    private void CommitHotkeyRecording(HotkeyTarget target)
     {
-        if (_pendingHotkey == default)
+        if (_pendingHotkey is not { } pending)
         {
-            ToggleHotkeyHint.Text = "请先按下包含修饰键的新组合键。";
+            SetHotkeyRecordingHint(target, "请先按下包含修饰键的新组合键。");
             return;
         }
 
-        if (!TryRegisterGlobalHotkey(_pendingHotkey, out var error))
+        if (!TryRegisterHotkey(target, pending, out var error))
         {
-            ToggleHotkeyHint.Text = error + " 请按其他组合键。";
+            SetHotkeyRecordingHint(target, error + " 请按其他组合键。");
             ShowHotkeyError(error);
             return;
         }
 
-        _activeHotkey = _pendingHotkey;
-        _recordingHotkey = false;
-        _settings.ToggleHotkeyModifiers = (int)_activeHotkey.Modifiers;
-        _settings.ToggleHotkeyKey = (int)_activeHotkey.Key;
-        UpdateHotkeyDisplay(_activeHotkey);
-        ToggleHotkeyHint.Text = "点击按钮可录入新的组合键。";
+        if (target == HotkeyTarget.BackgroundConvert)
+        {
+            _backgroundConvertHotkey = pending;
+            _settings.BackgroundConvertHotkeyModifiers = (int)pending.Modifiers;
+            _settings.BackgroundConvertHotkeyKey = (int)pending.Key;
+            BackgroundConvertHotkeyHint.Text = "按快捷键会在后台转换剪贴板，并发送系统通知。";
+        }
+        else
+        {
+            _toggleHotkey = pending;
+            _settings.ToggleHotkeyModifiers = (int)pending.Modifiers;
+            _settings.ToggleHotkeyKey = (int)pending.Key;
+            ToggleHotkeyHint.Text = "按快捷键可在前台最小化，或在后台恢复并聚焦。";
+        }
+
+        _recordingHotkeyTarget = HotkeyTarget.None;
+        _pendingHotkey = null;
+        UpdateHotkeyDisplay(target, pending);
         SaveSettings();
-        ShowMessage(InfoBarSeverity.Success, $"全局快捷键已设为 {_activeHotkey.DisplayText}。");
+        ShowMessage(InfoBarSeverity.Success, $"快捷键已设为 {pending.DisplayText}。");
     }
 
-    private void CancelHotkeyRecording()
+    private void CancelHotkeyRecording(HotkeyTarget target)
     {
-        _recordingHotkey = false;
-        _pendingHotkey = default;
-        UpdateHotkeyDisplay(_activeHotkey);
-        ToggleHotkeyHint.Text = "点击按钮可录入新的组合键。";
-        if (!TryRegisterGlobalHotkey(_activeHotkey, out var error))
+        _recordingHotkeyTarget = HotkeyTarget.None;
+        _pendingHotkey = null;
+
+        if (target == HotkeyTarget.BackgroundConvert)
         {
-            ShowHotkeyError(error);
+            UpdateHotkeyDisplay(target, _backgroundConvertHotkey);
+            BackgroundConvertHotkeyHint.Text = BackgroundConvertToggle.IsOn
+                ? _backgroundConvertHotkey is null
+                    ? "点击按钮录入组合键；未设置时功能不会触发。"
+                    : "按快捷键会在后台转换剪贴板，并发送系统通知。"
+                : "开启后点击按钮录入组合键；操作在后台完成并发送系统通知。";
+            if (BackgroundConvertToggle.IsOn && _backgroundConvertHotkey is { } backgroundHotkey &&
+                !TryRegisterHotkey(target, backgroundHotkey, out var error))
+            {
+                ShowHotkeyError(error);
+            }
+        }
+        else
+        {
+            UpdateHotkeyDisplay(target, _toggleHotkey);
+            ToggleHotkeyHint.Text = WindowHotkeyToggle.IsOn
+                ? "按快捷键可在前台最小化，或在后台恢复并聚焦。"
+                : "窗口快捷键已关闭。";
+            if (WindowHotkeyToggle.IsOn &&
+                !TryRegisterHotkey(target, _toggleHotkey, out var error))
+            {
+                ShowHotkeyError(error);
+            }
         }
     }
 
@@ -407,9 +624,42 @@ public sealed partial class MainWindow : Window
     private static bool IsValidHotkeyKey(uint key) =>
         key is > 0 and < 0x100 && !HotkeyGesture.IsModifierKey((VirtualKey)key);
 
-    private void UpdateHotkeyDisplay(HotkeyGesture hotkey)
+    private void UpdateHotkeyDisplay(HotkeyTarget target, HotkeyGesture? hotkey)
     {
-        ToggleHotkeyValue.Text = hotkey.DisplayText;
+        if (target == HotkeyTarget.BackgroundConvert)
+        {
+            BackgroundConvertHotkeyValue.Text = hotkey?.DisplayText ?? "未设置";
+        }
+        else
+        {
+            ToggleHotkeyValue.Text = hotkey?.DisplayText ?? HotkeyGesture.Default.DisplayText;
+        }
+    }
+
+    private void SetHotkeyRecordingHint(HotkeyTarget target, string hint)
+    {
+        if (target == HotkeyTarget.BackgroundConvert)
+        {
+            BackgroundConvertHotkeyHint.Text = hint;
+        }
+        else
+        {
+            ToggleHotkeyHint.Text = hint;
+        }
+    }
+
+    private void SetHotkeyRecordingText(HotkeyTarget target, string value, string hint)
+    {
+        if (target == HotkeyTarget.BackgroundConvert)
+        {
+            BackgroundConvertHotkeyValue.Text = value;
+            BackgroundConvertHotkeyHint.Text = hint;
+        }
+        else
+        {
+            ToggleHotkeyValue.Text = value;
+            ToggleHotkeyHint.Text = hint;
+        }
     }
 
     private void ShowHotkeyError(string error)
@@ -423,13 +673,73 @@ public sealed partial class MainWindow : Window
         IntPtr wParam,
         IntPtr lParam)
     {
-        if (message == WmHotkey && wParam.ToInt64() == GlobalHotkeyId)
+        if (_trayIcon?.HandleMessage(message, lParam) == true)
+        {
+            return IntPtr.Zero;
+        }
+
+        if (message == WmHotkey && wParam.ToInt64() == ToggleHotkeyId)
         {
             ToggleWindowFromHotkey();
             return IntPtr.Zero;
         }
 
+        if (message == WmHotkey && wParam.ToInt64() == BackgroundConvertHotkeyId)
+        {
+            DispatcherQueue.TryEnqueue(async () => await ConvertClipboardFromHotkeyAsync());
+            return IntPtr.Zero;
+        }
+
         return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+
+    private async Task ConvertClipboardFromHotkeyAsync()
+    {
+        if (Interlocked.Exchange(ref _backgroundClipboardBusy, 1) != 0)
+        {
+            AppNotificationService.Show("Markdown 转 Word", "剪贴板转换正在进行。");
+            return;
+        }
+
+        try
+        {
+            var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+            if (!content.Contains(StandardDataFormats.Text))
+            {
+                AppNotificationService.Show("Markdown 转 Word", "剪贴板中没有可转换的文本。");
+                return;
+            }
+
+            var markdown = await content.GetTextAsync();
+            if (string.IsNullOrWhiteSpace(markdown))
+            {
+                AppNotificationService.Show("Markdown 转 Word", "剪贴板中没有可转换的文本。");
+                return;
+            }
+
+            if (await IsOwnClipboardContentAsync())
+            {
+                AppNotificationService.Show("Markdown 转 Word", "剪贴板已经是带格式的转换结果。");
+                return;
+            }
+
+            var baseDirectory = _currentPath is null
+                ? _settings.LastDirectory
+                : Path.GetDirectoryName(_currentPath);
+            var warnings = await ConvertMarkdownToClipboardAsync(markdown, baseDirectory);
+            var message = warnings.Count == 0
+                ? "剪贴板已替换为带格式的 Word 正文。"
+                : $"剪贴板已替换；另有 {warnings.Count} 条警告：{warnings[0]}";
+            AppNotificationService.Show("Markdown 转 Word", message);
+        }
+        catch (Exception ex)
+        {
+            AppNotificationService.Show("Markdown 转 Word", "后台转换失败：" + ex.Message);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _backgroundClipboardBusy, 0);
+        }
     }
 
     private void ToggleWindowFromHotkey()
@@ -463,8 +773,11 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
-        _recordingHotkey = false;
-        UnregisterGlobalHotkey();
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+        _recordingHotkeyTarget = HotkeyTarget.None;
+        UnregisterAllHotkeys();
+        AppNotificationService.Shutdown();
         if (_hotkeyWindow != IntPtr.Zero)
         {
             DestroyWindow(_hotkeyWindow);
@@ -480,11 +793,70 @@ public sealed partial class MainWindow : Window
         SaveSettings();
     }
 
+    private void InitializeTrayIcon()
+    {
+        try
+        {
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+            if (File.Exists(iconPath))
+            {
+                _trayIcon = new TrayIconService(
+                    _hotkeyWindow,
+                    iconPath,
+                    "Markdown 转 Word · 离线版",
+                    ShowWindowFromTray,
+                    ExitFromTray);
+            }
+        }
+        catch
+        {
+            _trayIcon = null;
+        }
+    }
+
+    private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_allowExit || _trayIcon is null)
+        {
+            return;
+        }
+
+        args.Cancel = true;
+        sender.Hide();
+    }
+
+    private void ShowWindowFromTray()
+    {
+        var handle = EnsureWindowHandle();
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (IsIconic(handle))
+        {
+            ShowWindow(handle, SwRestore);
+        }
+
+        AppWindow.Show();
+        Activate();
+        SetForegroundWindow(handle);
+    }
+
+    private void ExitFromTray()
+    {
+        _allowExit = true;
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+        Close();
+    }
+
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
-        if (args.WindowActivationState == WindowActivationState.Deactivated && _recordingHotkey)
+        if (args.WindowActivationState == WindowActivationState.Deactivated &&
+            _recordingHotkeyTarget is not HotkeyTarget.None)
         {
-            CancelHotkeyRecording();
+            CancelHotkeyRecording(_recordingHotkeyTarget);
         }
     }
 
@@ -834,7 +1206,7 @@ public sealed partial class MainWindow : Window
         {
             SetBusy(true, "正在生成带格式的正文…");
             var baseDirectory = _currentPath is null ? null : Path.GetDirectoryName(_currentPath);
-            var warnings = await Task.Run(() => RichTextClipboard.Copy(markdown, _options, baseDirectory));
+            var warnings = await ConvertMarkdownToClipboardAsync(markdown, baseDirectory);
             if (generation != _clipboardGeneration)
             {
                 return;
@@ -859,6 +1231,11 @@ public sealed partial class MainWindow : Window
                 SetBusy(false, "就绪");
             }
         }
+    }
+
+    private Task<List<string>> ConvertMarkdownToClipboardAsync(string markdown, string? baseDirectory)
+    {
+        return Task.Run(() => RichTextClipboard.Copy(markdown, _options, baseDirectory));
     }
 
     private void OnClearClicked(object sender, RoutedEventArgs e)
@@ -1030,9 +1407,10 @@ public sealed partial class MainWindow : Window
 
     private void OnSettingsClicked(object sender, RoutedEventArgs e)
     {
-        if (SettingsPanel.Visibility == Visibility.Visible && _recordingHotkey)
+        if (SettingsPanel.Visibility == Visibility.Visible &&
+            _recordingHotkeyTarget is not HotkeyTarget.None)
         {
-            CancelHotkeyRecording();
+            CancelHotkeyRecording(_recordingHotkeyTarget);
         }
 
         SettingsPanel.Visibility = SettingsPanel.Visibility == Visibility.Visible
@@ -1042,9 +1420,9 @@ public sealed partial class MainWindow : Window
 
     private void OnSettingsCloseClicked(object sender, RoutedEventArgs e)
     {
-        if (_recordingHotkey)
+        if (_recordingHotkeyTarget is not HotkeyTarget.None)
         {
-            CancelHotkeyRecording();
+            CancelHotkeyRecording(_recordingHotkeyTarget);
         }
 
         SettingsPanel.Visibility = Visibility.Collapsed;
@@ -1229,8 +1607,24 @@ public sealed partial class MainWindow : Window
 
     private void ApplySettingsToUi()
     {
-        _activeHotkey = ReadConfiguredHotkey();
-        UpdateHotkeyDisplay(_activeHotkey);
+        _toggleHotkey = ReadConfiguredToggleHotkey();
+        _backgroundConvertHotkey = ReadConfiguredBackgroundConvertHotkey();
+        UpdateHotkeyDisplay(HotkeyTarget.ToggleWindow, _toggleHotkey);
+        UpdateHotkeyDisplay(HotkeyTarget.BackgroundConvert, _backgroundConvertHotkey);
+        WindowHotkeyToggle.IsOn = _settings.ToggleWindowHotkeyEnabled;
+        WindowHotkeyPanel.IsHitTestVisible = _settings.ToggleWindowHotkeyEnabled;
+        WindowHotkeyPanel.Opacity = _settings.ToggleWindowHotkeyEnabled ? 1 : 0.55;
+        ToggleHotkeyHint.Text = _settings.ToggleWindowHotkeyEnabled
+            ? "按快捷键可在前台最小化，或在后台恢复并聚焦。"
+            : "窗口快捷键已关闭。";
+        BackgroundConvertToggle.IsOn = _settings.BackgroundConvertEnabled;
+        BackgroundConvertHotkeyPanel.IsHitTestVisible = _settings.BackgroundConvertEnabled;
+        BackgroundConvertHotkeyPanel.Opacity = _settings.BackgroundConvertEnabled ? 1 : 0.55;
+        BackgroundConvertHotkeyHint.Text = !_settings.BackgroundConvertEnabled
+            ? "开启后点击按钮录入组合键；操作在后台完成并发送系统通知。"
+            : _backgroundConvertHotkey is null
+                ? "点击按钮录入组合键；未设置时功能不会触发。"
+                : "按快捷键会在后台转换剪贴板，并发送系统通知。";
 
         _pageSizeIndex = _settings.PageSize switch
         {
@@ -1521,9 +1915,24 @@ public sealed partial class MainWindow : Window
 
         public int ToggleHotkeyKey { get; set; } = (int)VirtualKey.D;
 
+        public bool ToggleWindowHotkeyEnabled { get; set; } = true;
+
+        public bool BackgroundConvertEnabled { get; set; }
+
+        public int BackgroundConvertHotkeyModifiers { get; set; }
+
+        public int BackgroundConvertHotkeyKey { get; set; }
+
         public string Theme { get; set; } = "system";
 
         public string? LastDirectory { get; set; }
+    }
+
+    private enum HotkeyTarget
+    {
+        None,
+        ToggleWindow,
+        BackgroundConvert,
     }
 
     private readonly record struct HotkeyGesture(uint Modifiers, uint Key)

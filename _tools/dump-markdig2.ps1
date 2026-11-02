@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$asm = [System.Reflection.Assembly]::LoadFrom("$env:USERPROFILE\.nuget\packages\markdig\1.4.0\lib\net8.0\Markdig.dll")
+$asm = [System.Reflection.Assembly]::LoadFrom('C:\Users\AZURE\.nuget\packages\markdig\1.4.0\lib\net8.0\Markdig.dll')
 $types = $asm.GetExportedTypes()
 
 Write-Host "--- Diagrams namespace ---"

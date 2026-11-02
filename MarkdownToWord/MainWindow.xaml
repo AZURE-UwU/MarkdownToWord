@@ -182,7 +182,14 @@
                         <TextBlock Text="以上设置会立即用于导出与预览，并自动记住。" TextWrapping="Wrap" Opacity="0.7" FontSize="12" />
 
                         <TextBlock Text="窗口快捷键" FontWeight="SemiBold" Margin="0,6,0,0" />
-                        <StackPanel Spacing="4">
+                        <ToggleSwitch
+                            x:Name="WindowHotkeyToggle"
+                            Header="启用窗口快捷键"
+                            OnContent="开"
+                            OffContent="关"
+                            IsOn="True"
+                            Toggled="OnWindowHotkeyToggled" />
+                        <StackPanel x:Name="WindowHotkeyPanel" Spacing="4">
                             <TextBlock Text="显示 / 最小化窗口" Opacity="0.8" />
                             <Button
                                 x:Name="ToggleHotkeyButton"
@@ -197,6 +204,33 @@
                             <TextBlock
                                 x:Name="ToggleHotkeyHint"
                                 Text="点击后按下新的组合键，再按回车确认。"
+                                TextWrapping="Wrap"
+                                Opacity="0.7"
+                                FontSize="12" />
+                        </StackPanel>
+
+                        <TextBlock Text="后台剪贴板转换" FontWeight="SemiBold" Margin="0,6,0,0" />
+                        <ToggleSwitch
+                            x:Name="BackgroundConvertToggle"
+                            Header="启用后台转换快捷键"
+                            OnContent="开"
+                            OffContent="关"
+                            Toggled="OnBackgroundConvertToggled" />
+                        <StackPanel x:Name="BackgroundConvertHotkeyPanel" Spacing="4" IsHitTestVisible="False" Opacity="0.55">
+                            <TextBlock Text="转换当前剪贴板" Opacity="0.8" />
+                            <Button
+                                x:Name="BackgroundConvertHotkeyButton"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                Click="OnBackgroundConvertHotkeyClicked">
+                                <Grid>
+                                    <TextBlock x:Name="BackgroundConvertHotkeyValue" HorizontalAlignment="Left" Text="未设置" />
+                                    <FontIcon Glyph="&#xE765;" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                            <TextBlock
+                                x:Name="BackgroundConvertHotkeyHint"
+                                Text="开启后点击按钮录入组合键；操作在后台完成并发送系统通知。"
                                 TextWrapping="Wrap"
                                 Opacity="0.7"
                                 FontSize="12" />
